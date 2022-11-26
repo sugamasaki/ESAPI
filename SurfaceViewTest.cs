@@ -1,6 +1,3 @@
-#define ESAPI_V15
-//#define ESAPI_V11
-
 using System;
 using System.Linq;
 using System.Text;
@@ -61,11 +58,15 @@ namespace VMS.TPS
                     dose = planSum.Dose;
                     foreach (var ps in planSum.PlanSetups)
                     {
-#if ESAPI_V15
-                        DoseValue TotalDose = ps.TotalDose;
-#else
-                        DoseValue TotalDose = ps.TotalPrescribedDose;
-#endif
+                        DoseValue TotalDose;
+                        if(context.VersionInfo.Contains("15"))
+                        {
+                            TotalDose = (DoseValue)typeof(PlanSetup).GetProperty("TotalDose").GetValue(ps);
+                        }
+                        else
+                        {
+                            TotalDose = (DoseValue)typeof(PlanSetup).GetProperty("TotalPrescribedDose").GetValue(ps);
+                        }
                         var val = TotalDose.Dose;
                         if (TotalDose.Unit == DoseValue.DoseUnit.cGy)
                         {
@@ -79,11 +80,15 @@ namespace VMS.TPS
             {
                 plan.DoseValuePresentation = DoseValuePresentation.Relative;
                 dose = plan.Dose;
-#if ESAPI_V15
-                DoseValue TotalDose = plan.TotalDose;
-#else
-                DoseValue TotalDose = plan.TotalPrescribedDose;
-#endif
+                DoseValue TotalDose;
+                if (context.VersionInfo.Contains("15"))
+                {
+                    TotalDose = (DoseValue)typeof(PlanSetup).GetProperty("TotalDose").GetValue(plan);
+                }
+                else
+                {
+                    TotalDose = (DoseValue)typeof(PlanSetup).GetProperty("TotalPrescribedDose").GetValue(plan);
+                }
                 totalDose = TotalDose.Dose;
                 if (TotalDose.Unit == DoseValue.DoseUnit.cGy)
                 {
@@ -173,6 +178,7 @@ namespace VMS.TPS
         Point pre_point = new Point(0, 0);
         Vector3D transform = new Vector3D(0, 0, 0);
         Vector3D pre_transform = new Vector3D(0, 0, 0);
+        Vector3D structure_center = new Vector3D(0, 0, 0);
         const int ncolors = 106;
         int selected_roi = 0;
         bool IsRelativeDoseValue = true;
@@ -225,30 +231,24 @@ namespace VMS.TPS
             textBlock2.VerticalAlignment = VerticalAlignment.Top;
             textBlock2.Foreground = Brushes.White;
             textBlock2.FontSize = 24;
-            textBlock2.Margin = new Thickness(0, 70, 0, 0);
+            textBlock2.Margin = new Thickness(0, 60, 0, 0);
             this.Children.Add(textBlock2);
             TextBox textBox = new TextBox();
             textBox.HorizontalAlignment = HorizontalAlignment.Left;
             textBox.VerticalAlignment = VerticalAlignment.Top;
+            textBox.Foreground = Brushes.White;
             textBox.FontSize = 24;
-            textBox.Width = 80;
-            textBox.Margin = new Thickness(0, 100, 0, 0);
+            textBox.Width = 100;
+            textBox.Margin = new Thickness(0, 90, 0, 0);
             textBox.Text = totalDose.ToString();
             textBox.TextChanged += TextBox_TextChanged;
-            textBox.TextAlignment = TextAlignment.Right;
-            if (IsRelativeDoseValue)
-            {
-                textBox.Background = Brushes.Black;
-                textBox.Foreground = Brushes.White;
-                textBox.IsReadOnly = true;
-            }
             this.Children.Add(textBox);
             TextBlock textBlock3 = new TextBlock(new Run("Gy"));
             textBlock3.HorizontalAlignment = HorizontalAlignment.Left;
             textBlock3.VerticalAlignment = VerticalAlignment.Top;
             textBlock3.Foreground = Brushes.White;
             textBlock3.FontSize = 24;
-            textBlock3.Margin = new Thickness(100, 105, 0, 0);
+            textBlock3.Margin = new Thickness(100, 90, 0, 0);
             this.Children.Add(textBlock3);
             this.Background = Brushes.Black;
             this.MouseWheel += SurfaceView_MouseWheel;
@@ -338,6 +338,7 @@ namespace VMS.TPS
                 {
                     val -= 90;
                     val /= 5;
+
                     bytecolor[3 * i] = 255;
                     bytecolor[3 * i + 1] = (byte)((255 - 165) * (1 - val) + 165);
                     bytecolor[3 * i + 2] = 0;
@@ -481,10 +482,7 @@ namespace VMS.TPS
                 Geometry = new MeshGeometry3D() { Positions = new Point3DCollection(positions), TextureCoordinates = new PointCollection(points) },
                 Material = new DiffuseMaterial(imageBrush),
             };
-            if (viewMode == 2)
-            {
-                model.BackMaterial = model.Material;
-            }
+            model.BackMaterial = model.Material;
         }
         private void Combobox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
@@ -494,16 +492,18 @@ namespace VMS.TPS
             viewport3D.Children.RemoveAt(1);
             viewport3D.Children.Add(new ModelVisual3D() { Content = model });
             Transform3DGroup transform3DGroup = new Transform3DGroup();
+            var s = ss.Structures.ElementAt(selected_roi);
+            var vv = s.CenterPoint;
+            structure_center = new Vector3D(-vv.x, -vv.y, -vv.z);
             if (viewMode == 1)
             {
+                transform3DGroup.Children.Add(new TranslateTransform3D(structure_center));
                 transform3DGroup.Children.Add(new RotateTransform3D(new QuaternionRotation3D(quaternion)));
                 transform3DGroup.Children.Add(new TranslateTransform3D(transform.X, 0, transform.Z));
                 model.Transform = transform3DGroup;
             }
             if (viewMode == 2)
             {
-                var s = ss.Structures.ElementAt(selected_roi);
-                var vv = s.CenterPoint;
                 transform = new Vector3D(-vv.x, -vv.y, -vv.z);
                 transform3DGroup.Children.Add(new TranslateTransform3D(transform));
                 transform3DGroup.Children.Add(new RotateTransform3D(new QuaternionRotation3D(quaternion)));
@@ -520,8 +520,9 @@ namespace VMS.TPS
                 viewport3D.Children.Clear();
                 viewport3D.Children.Add(new ModelVisual3D() { Content = directionalLight });
                 viewport3D.Children.Add(new ModelVisual3D() { Content = model });
-                quaternion = new Quaternion();
-                model.Transform = new RotateTransform3D(new QuaternionRotation3D(quaternion));
+                //quaternion = new Quaternion();
+                //model.Transform = new RotateTransform3D(new QuaternionRotation3D(quaternion));
+                model.Transform = new TranslateTransform3D(structure_center);
                 transform = new Vector3D(0, 0, 0);
                 directionalLight.Transform = new TranslateTransform3D(transform);
                 camera.Transform = new TranslateTransform3D(transform);
@@ -564,6 +565,7 @@ namespace VMS.TPS
                 Transform3DGroup transform3DGroup = new Transform3DGroup();
                 if (viewMode == 1)
                 {
+                    transform3DGroup.Children.Add(new TranslateTransform3D(structure_center));
                     transform3DGroup.Children.Add(new RotateTransform3D(new QuaternionRotation3D(q)));
                     transform3DGroup.Children.Add(new TranslateTransform3D(transform.X, 0, transform.Z));
                     model.Transform = transform3DGroup;
@@ -582,6 +584,7 @@ namespace VMS.TPS
                 Transform3DGroup transform3DGroup = new Transform3DGroup();
                 if (viewMode == 1)
                 {
+                    transform3DGroup.Children.Add(new TranslateTransform3D(structure_center));
                     transform3DGroup.Children.Add(new RotateTransform3D(new QuaternionRotation3D(quaternion)));
                     transform3DGroup.Children.Add(new TranslateTransform3D(x + transform.X, 0, y + transform.Z));
                     model.Transform = transform3DGroup;
@@ -617,6 +620,7 @@ namespace VMS.TPS
                 if (viewMode == 1)
                 {
                     transform = new Vector3D(x + transform.X, transform.Y, y + transform.Z);
+                    transform3DGroup.Children.Add(new TranslateTransform3D(structure_center));
                     transform3DGroup.Children.Add(new RotateTransform3D(new QuaternionRotation3D(quaternion)));
                     transform3DGroup.Children.Add(new TranslateTransform3D(transform.X, 0, transform.Z));
                     model.Transform = transform3DGroup;
@@ -669,6 +673,7 @@ namespace VMS.TPS
                 Transform3DGroup transform3DGroup = new Transform3DGroup();
                 if (viewMode == 1)
                 {
+                    transform3DGroup.Children.Add(new TranslateTransform3D(structure_center));
                     transform3DGroup.Children.Add(new RotateTransform3D(new QuaternionRotation3D(quaternion)));
                     transform3DGroup.Children.Add(new TranslateTransform3D(transform.X, 0, transform.Z));
                     model.Transform = transform3DGroup;
@@ -733,6 +738,7 @@ namespace VMS.TPS
                 if (viewMode == 1)
                 {
                     transform = new Vector3D(x + transform.X, transform.Y, y + transform.Z);
+                    transform3DGroup.Children.Add(new TranslateTransform3D(structure_center));
                     transform3DGroup.Children.Add(new RotateTransform3D(new QuaternionRotation3D(quaternion)));
                     transform3DGroup.Children.Add(new TranslateTransform3D(transform.X, 0, transform.Z));
                     model.Transform = transform3DGroup;
@@ -763,6 +769,7 @@ namespace VMS.TPS
                 Transform3DGroup transform3DGroup = new Transform3DGroup();
                 if (viewMode == 1)
                 {
+                    transform3DGroup.Children.Add(new TranslateTransform3D(structure_center));
                     transform3DGroup.Children.Add(new RotateTransform3D(new QuaternionRotation3D(quaternion)));
                     transform3DGroup.Children.Add(new TranslateTransform3D(transform.X, 0, transform.Z));
                     model.Transform = transform3DGroup;
